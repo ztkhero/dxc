@@ -1,4 +1,4 @@
-import requests, json, re, time
+import requests, json, re, time, sys
 from netmiko import ConnectHandler
 import warnings
 
@@ -55,7 +55,7 @@ class APICAPI():
         app = datalist[2]
         self.app = re.search('ap-(.*)', app).groups()[0]
         epg = datalist[3]
-        self.epg = re.search('g1-(.*)', epg).groups()[0]
+        self.epg = re.search('-(.*)', epg).groups()[0]
 
         print("The MAC is: {mac}".format(mac=self.mac))
         print("Learned from: {0}".format(self.learnat))
@@ -117,6 +117,7 @@ class APICAPI():
         print("The CDP neighbors are: {0}".format(cdpsysname))
         self.switches = cdpsysname  # 登录函数需要使用
         print("------------------------------------------------------------------------")
+        return cdpsysname
 
     def tonexus(self):
         print("------------------------Accessing N5K--------------------------------")
@@ -128,7 +129,7 @@ class APICAPI():
                 ip = switchdb[switch]
             except:
                 print("No such switch in DB!!")
-                exit(1)
+                return None
 
         n5k = {
             "device_type": "cisco_nxos",
@@ -146,7 +147,7 @@ class APICAPI():
 
     def __mactrans(self):
         oldmac = self.mac.replace(':', '').lower()
-        newmac = '.'.join(oldmac[i:i + 4] for i in range(0, 12, 4)) # range -- 0,4,8
+        newmac = '.'.join(oldmac[i:i + 4] for i in range(0, 12, 4))  # range -- 0,4,8
         return newmac
 
     def test(self):
@@ -157,13 +158,28 @@ class APICAPI():
 
 
 if __name__ == '__main__':
+    # note:
     name = 'tzhang'
     pwd = 'vOkls2'
-    apicip = "10.33.158.133"
-    mac = "00:50:56:99:49:C6"
+    apicip1 = "10.33.158.133"
+    apicip2 = "10.41.158.133"
 
-    dxcapic = APICAPI(name, pwd, apicip, mac)
+    try:
+        mac = sys.argv[1]
+    except:
+        mac = "00:50:56:99:49:C6"
+
+    dxcapic = APICAPI(name, pwd, apicip1, mac)
     dxcapic.EP_tracker()
     dxcapic.nodePort()
-    dxcapic.cdp()
+    swname = dxcapic.cdp()  # 从CDP的名字来检查对联是不是DC2的，如果连接的是LEF就是DC2，需要从走流程
     dxcapic.tonexus()
+    print(swname)
+    if "LEF" in str(swname):
+        print("Transfering APCI2 . . . . .")
+        time.sleep(2)
+        dxcapic = APICAPI(name, pwd, apicip2, mac)
+        dxcapic.EP_tracker()
+        dxcapic.nodePort()
+        dxcapic.cdp()
+        dxcapic.tonexus()
