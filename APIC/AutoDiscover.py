@@ -55,7 +55,7 @@ class APICAPI():
         app = datalist[2]
         self.app = re.search('ap-(.*)', app).groups()[0]
         epg = datalist[3]
-        self.epg = re.search('-(.*)', epg).groups()[0]
+        self.epg = re.search('g\d-(.*)', epg).groups()[0]
 
         print("The MAC is: {mac}".format(mac=self.mac))
         print("Learned from: {0}".format(self.learnat))
@@ -104,8 +104,8 @@ class APICAPI():
     def cdp(self):
         print("------------------------CDP Searching--------------------------------")
         # {'1023': ['eth1/1', 'eth1/45'], '2023': ['eth1/1', 'eth1/45']}
+        cdpsysname = []
         for node in self.nodes:
-            cdpsysname = []
             for interface in self.nodes[node]:
                 url = self.apicip + '/api/node/mo/topology/pod-1/node-' + node + '/sys/cdp/inst/if-[' + interface + '].json?query-target=children&target-subtree-class=cdpAdjEp'
                 # lldp --->   url: https://10.33.158.133/api/node/mo/topology/pod-1/node-2023/sys/lldp/inst/if-[eth1/1].json?query-target=children&target-subtree-class=lldpAdjEp
@@ -130,20 +130,20 @@ class APICAPI():
             except:
                 print("No such switch in DB!!")
                 return None
-
-        n5k = {
-            "device_type": "cisco_nxos",
-            "host": ip,
-            "username": self.name,
-            "password": self.pwd,
-        }
-        command = "show mac address-table | in " + self.__mactrans()
-        cmd2 = "show run interface Eth151/1/5"
-        # Will automatically 'disconnect()'
-        with ConnectHandler(**n5k) as net_connect:
-            output = net_connect.send_command(command)
-            print(output)
-        print("------------------------------------------------------------------------")
+            print("{0}:{1}".format(switch,ip))
+            n5k = {
+                "device_type": "cisco_nxos",
+                "host": ip,
+                "username": self.name,
+                "password": self.pwd,
+            }
+            command = "show mac address-table | in " + self.__mactrans()
+            cmd2 = "show run interface Eth151/1/5"
+            # Will automatically 'disconnect()'
+            with ConnectHandler(**n5k) as net_connect:
+                output = net_connect.send_command(command)
+                print(output)
+            print("------------------------------------------------------------------------")
 
     def __mactrans(self):
         oldmac = self.mac.replace(':', '').lower()
@@ -174,7 +174,6 @@ if __name__ == '__main__':
     dxcapic.nodePort()
     swname = dxcapic.cdp()  # 从CDP的名字来检查对联是不是DC2的，如果连接的是LEF就是DC2，需要从走流程
     dxcapic.tonexus()
-    print(swname)
     if "LEF" in str(swname):
         print("Transfering APCI2 . . . . .")
         time.sleep(2)
