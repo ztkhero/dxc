@@ -10,6 +10,7 @@ class APICAPI():
         self.name = name
         self.pwd = pwd
         self.apicip = "https://" + apicip
+        self.sship = apicip
         self.token = ''
         self.headers = {
             "Content-type": "application/json"
@@ -110,6 +111,10 @@ class APICAPI():
                 url = self.apicip + '/api/node/mo/topology/pod-1/node-' + node + '/sys/cdp/inst/if-[' + interface + '].json?query-target=children&target-subtree-class=cdpAdjEp'
                 # lldp --->   url: https://10.33.158.133/api/node/mo/topology/pod-1/node-2023/sys/lldp/inst/if-[eth1/1].json?query-target=children&target-subtree-class=lldpAdjEp
                 r = self.s.get(url, headers=self.headers, verify=False)
+                if not json.loads(r.text)['imdata']:  # 如果CDP信息为空，那么很可能host 直连ACI的
+                    print("No CDP information, need to connect to ACI identifying")
+                    self.__leaf_check()  # 找到不到CDP后，直接去leaf查看mac，验证是否为直连
+                    exit(1)
                 sysname = json.loads(r.text)['imdata'][0]['cdpAdjEp']['attributes'].get('sysName')
                 if sysname not in cdpsysname:
                     cdpsysname.append(sysname)
@@ -118,6 +123,52 @@ class APICAPI():
         self.switches = cdpsysname  # 登录函数需要使用
         print("------------------------------------------------------------------------")
         return cdpsysname
+
+    def __leaf_check(self):  # apic ssh 登录获得信息
+        print("------------------------Accessing Leaf--------------------------------")
+        cisco1 = {
+            "device_type": "cisco_apic",
+            "host": self.sship,
+            "username": self.name,
+            "password": self.pwd,
+        }
+        cmdlist = []
+        for node in self.nodes:
+            command = "fabric " + node + " show mac address-table | grep " + self.__mactrans()
+            cmdlist.append(command)
+            # cmd2 = "fabric 1026 show interface po12 | grep 'Members\|description'"
+        # Will automatically 'disconnect()'
+        with ConnectHandler(**cisco1) as net_connect:
+            for cmd in cmdlist:
+                output = net_connect.send_command(cmd).strip()
+                print(output)
+
+                ifnamelist = self.__apic_trans(output)  # 接口临时存储，用于查询接口信息
+                node = re.search("fabric\s(\d+)\s", cmd).groups()[0]  # 把node从cmd里面取出来show interface
+                for ifname in ifnamelist:  # 输出接口信息
+                    print("--> Reading {ifname} information . . .".format(ifname=ifname))
+                    ifcmd = "fabric " + node + " show interface " + ifname + " | grep 'Members\|description'"
+                    output = net_connect.send_command(ifcmd).strip()
+                    print(output)
+                    print("--> Result:")
+                    phif = re.search("channel:\s(.+)", output).groups()[0]  # 过滤出物理接口的名字，与ACI中的名字进行对比
+                    if phif in self.nodes[
+                        node]:  # {'1023': ['eth1/1', 'eth1/45']}
+                        print("Host {mac} is directly connect to Node-{node} Interface-{phif}".format(mac=self.mac,
+                                                                                                      node=node,
+                                                                                                      phif=phif))
+                    else:
+                        print("Need more investigation. . . ")
+                print("------------------------------------")
+
+    def __apic_trans(self, data):
+        ifnamelist = []
+        for d in data.split("\n"):  # 接口临时存储，用于查询接口信息
+            d = d.replace("\n", "")
+            ifname = d.split(" ")[-1]
+            if ifname not in ifnamelist:  # 把ssh得到的接口信息过滤后放到list，并且过滤掉重复接口
+                ifnamelist.append(ifname)
+        return ifnamelist
 
     def tonexus(self):
         print("------------------------Accessing N5K--------------------------------")
@@ -130,7 +181,7 @@ class APICAPI():
             except:
                 print("No such switch in DB!!")
                 return None
-            print("{0}:{1}".format(switch,ip))
+            print("{0}:{1}".format(switch, ip))
             n5k = {
                 "device_type": "cisco_nxos",
                 "host": ip,
@@ -158,7 +209,7 @@ class APICAPI():
 
 
 if __name__ == '__main__':
-    # note:
+    # note: 00:50:56:99:7B:0C 10.34.208.53 objective 直连？ 如何查看leaf的mac address table
     name = 'tzhang'
     pwd = 'vOkls2'
     apicip1 = "10.33.158.133"
