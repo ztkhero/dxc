@@ -1,5 +1,6 @@
 import requests, json, re, time, sys
 from netmiko import ConnectHandler
+from collections import Counter  # list comparision
 import warnings
 
 warnings.filterwarnings("ignore")
@@ -15,7 +16,8 @@ class APICAPI():
         self.headers = {
             "Content-type": "application/json"
         }
-        self.mac = mac
+        # self.mac = mac
+        self.__initialMac(mac)  # 输入任何格式的mac都可以进行输出
         self.s = requests.session()
         self.getToken()  # get token first before any action
 
@@ -35,7 +37,7 @@ class APICAPI():
         # self.urltoken = urltoken
         print("------------------------Token Done--------------------------------")
 
-    def EP_tracker(self):
+    def __EP_tracker(self):
         print("------------------------Start Detect--------------------------------")
         url = self.apicip + '/api/node/class/fvCEp.json?rsp-subtree=full&rsp-subtree-class=fvCEp,fvRsCEpToPathEp,fvIp,fvRsHyper,fvRsToNic,fvRsToVm&query-target-filter=eq(fvCEp.mac,"' + self.mac + '")'
         r = self.s.get(url, headers=self.headers, verify=False)
@@ -70,7 +72,7 @@ class APICAPI():
 
         print("------------------------------------------------------------------------")
 
-    def nodePort(self):  # 获得node和端口信息
+    def __nodePort(self):  # 获得node和端口信息
         print("------------------------Port Searching--------------------------------")
         url = self.apicip + '/api/node/mo/uni/infra/funcprof/accbundle-' + self.learnat + '.json?rsp-subtree-include=full-deployment&target-path=AccBaseGrpToEthIf'
         r = self.s.get(url, headers=self.headers, verify=False)
@@ -102,7 +104,7 @@ class APICAPI():
                         # before re output: topology/pod-1/node-3172/sys/phys-[eth1/41]
             print("------------------------------------------------------------------------")
 
-    def cdp(self):
+    def __cdp(self):
         print("------------------------CDP Searching--------------------------------")
         # {'1023': ['eth1/1', 'eth1/45'], '2023': ['eth1/1', 'eth1/45']}
         cdpsysname = []
@@ -152,11 +154,14 @@ class APICAPI():
                     print(output)
                     print("--> Result:")
                     phif = re.search("channel:\s(.+)", output).groups()[0]  # 过滤出物理接口的名字，与ACI中的名字进行对比
-                    if phif in self.nodes[
-                        node]:  # {'1023': ['eth1/1', 'eth1/45']}
+                    phif = phif.replace(' ', '')  # 如果有空格，去掉空格
+                    phiflist = phif.split(',')  # 'eth1/1, eth1/45' 如果多个接口，那么逗号分隔，如果一个，单独分隔，并且变为list
+
+                    if Counter(phiflist) == Counter(self.nodes[node]):  # {'1023': ['eth1/1', 'eth1/45']} 列表比较，必须顺序也是一样的
                         print("Host {mac} is directly connect to Node-{node} Interface-{phif}".format(mac=self.mac,
                                                                                                       node=node,
-                                                                                                      phif=phif))
+                                                                                                      phif=str(
+                                                                                                          phiflist)))
                     else:
                         print("Need more investigation. . . ")
                 print("------------------------------------")
@@ -201,11 +206,22 @@ class APICAPI():
         newmac = '.'.join(oldmac[i:i + 4] for i in range(0, 12, 4))  # range -- 0,4,8
         return newmac
 
+    def __initialMac(self, mac):
+        newmac = re.sub("[.:-]", "", mac).upper()
+        self.mac = ':'.join(newmac[i:i + 2] for i in range(0, 12, 2))
+
     def test(self):
         # "VpcForG1G2-L2DCI-ACI-Sync02-PolGrp"
         url = self.apicip + '/api/node/mo/uni/infra/funcprof/accbundle-' + self.learnat + '.json?rsp-subtree-include=full-deployment&target-path=AccBaseGrpToEthIf'
         r = self.s.get(url, headers=self.headers, verify=False)
         print(r.text)
+
+    def run(self):
+        self.__EP_tracker()
+        self.__nodePort()
+        swname = self.__cdp()  # 从CDP的名字来检查对联是不是DC2的，如果连接的是LEF就是DC2，需要从走流程
+        self.tonexus()
+        return swname
 
 
 if __name__ == '__main__':
@@ -221,15 +237,10 @@ if __name__ == '__main__':
         mac = "00:50:56:99:49:C6"
 
     dxcapic = APICAPI(name, pwd, apicip1, mac)
-    dxcapic.EP_tracker()
-    dxcapic.nodePort()
-    swname = dxcapic.cdp()  # 从CDP的名字来检查对联是不是DC2的，如果连接的是LEF就是DC2，需要从走流程
-    dxcapic.tonexus()
+    swname = dxcapic.run()  # 从CDP的名字来检查对联是不是DC2的，如果连接的是LEF就是DC2，需要从走流程
+
     if "LEF" in str(swname):
         print("Transfering APCI2 . . . . .")
         time.sleep(2)
         dxcapic = APICAPI(name, pwd, apicip2, mac)
-        dxcapic.EP_tracker()
-        dxcapic.nodePort()
-        dxcapic.cdp()
-        dxcapic.tonexus()
+        dxcapic.run()
