@@ -87,6 +87,7 @@ def sqlWrite(id, atime, user, api_key, operation, details, component, timestamp)
 
 
 if __name__ == '__main__':
+    print("master1")
     apikey = "ExtraHop apikey=ECvZVWm-9C8H0yS9xqX_hVvMOiOYsk4bvUhvOiYu824"
 
     eip = "https://10.33.197.102"
